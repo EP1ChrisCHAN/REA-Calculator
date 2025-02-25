@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employment Period Calculator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #2c3e50;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        select, input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .periods-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        .periods-table th, .periods-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        
+        .periods-table th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        
+        .column-header {
+            min-width: 120px;
+        }
+        
+        .error {
+            color: #e74c3c;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        
+        .summary {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+        }
+        
+        @media (max-width: 768px) {
+            .periods-table {
+                display: block;
+                overflow-x: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Employment Period Calculator</h1>
+        
+        <div class="form-group">
+            <label for="employmentType">Employment Type:</label>
+            <select id="employmentType">
+                <option value="">Select Employment Type</option>
+                <option value="1st">1st</option>
+                <option value="2nd">2nd</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="firstEmploymentDate">First Employment Date:</label>
+            <input type="date" id="firstEmploymentDate">
+            <div id="dateError" class="error"></div>
+        </div>
+        
+        <div class="form-group">
+            <label for="lastPeriodEndDate">Last Period End Date:</label>
+            <input type="date" id="lastPeriodEndDate" readonly>
+        </div>
+        
+        <table class="periods-table">
+            <thead>
+                <tr>
+                    <th class="column-header">Period</th>
+                    <th class="column-header">Start Date</th>
+                    <th class="column-header">End Date</th>
+                    <th class="column-header">Total Days</th>
+                    <th class="column-header">Work Type</th>
+                </tr>
+            </thead>
+            <tbody id="periodsTable">
+                <!-- Periods will be added here -->
+            </tbody>
+        </table>
+        
+        <div class="summary">
+            <h3>Work Days Allocation</h3>
+            <p>Full Days: <span id="fullDays">0</span></p>
+            <p>Part Days: <span id="partDays">0</span></p>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let periods = [];
+        
+        // DOM elements
+        const employmentTypeEl = document.getElementById('employmentType');
+        const firstEmploymentDateEl = document.getElementById('firstEmploymentDate');
+        const lastPeriodEndDateEl = document.getElementById('lastPeriodEndDate');
+        const periodsTableEl = document.getElementById('periodsTable');
+        const dateErrorEl = document.getElementById('dateError');
+        const fullDaysEl = document.getElementById('fullDays');
+        const partDaysEl = document.getElementById('partDays');
+        
+        // Constants
+        const MAX_PERIODS = 12; // Columns E to P in original VBA code
+        const MIN_DATE = new Date(2024, 6, 15); // July 15, 2024
+        
+        // Event listeners
+        employmentTypeEl.addEventListener('change', handleEmploymentTypeChange);
+        firstEmploymentDateEl.addEventListener('change', handleFirstEmploymentDateChange);
+        
+        // Initialize the table
+        function initializeTable() {
+            periodsTableEl.innerHTML = '';
+            for (let i = 0; i < MAX_PERIODS; i++) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>Period ${i + 1}</td>
+                    <td><input type="date" class="period-start" data-index="${i}" ${i > 0 ? 'disabled' : ''}></td>
+                    <td><input type="date" class="period-end" data-index="${i}" ${i > 0 ? 'disabled' : ''}></td>
+                    <td class="total-days" data-index="${i}"></td>
+                    <td>
+                        <select class="work-type" data-index="${i}" disabled>
+                            <option value="">Select</option>
+                            <option value="Full">Full</option>
+                            <option value="Part">Part</option>
+                        </select>
+                    </td>
+                `;
+                periodsTableEl.appendChild(row);
+            }
+            
+            // Add event listeners to the inputs
+            document.querySelectorAll('.period-start').forEach(el => {
+                el.addEventListener('change', handlePeriodStartChange);
+            });
+            
+            document.querySelectorAll('.period-end').forEach(el => {
+                el.addEventListener('change', handlePeriodEndChange);
+            });
+            
+            document.querySelectorAll('.work-type').forEach(el => {
+                el.addEventListener('change', handleWorkTypeChange);
+            });
+        }
+        
+        // Handle employment type change
+        function handleEmploymentTypeChange() {
+            clearAllPeriods();
+            if (firstEmploymentDateEl.value) {
+                generateFirstPeriod();
+            }
+        }
+        
+        // Handle first employment date change
+        function handleFirstEmploymentDateChange() {
+            const dateValue = firstEmploymentDateEl.value;
+            
+            if (!dateValue) {
+                clearAllPeriods();
+                return;
+            }
+            
+            const selectedDate = new Date(dateValue);
+            
+            // Check if the date is valid and not earlier than July 15, 2024
+            if (selectedDate < MIN_DATE) {
+                dateErrorEl.textContent = "The First Employment date should not be earlier than 15/7/2024!";
+                firstEmploymentDateEl.value = '';
+                clearAllPeriods();
+                return;
+            }
+            
+            dateErrorEl.textContent = '';
+            generateFirstPeriod();
+            recalculateWorkDaysAllocation();
+        }
+        
+        // Generate first period
+        function generateFirstPeriod() {
+            const employmentType = employmentTypeEl.value;
+            const startDate = new Date(firstEmploymentDateEl.value);
+            
+            if (!employmentType || !startDate) {
+                return;
+            }
+            
+            const poolDays = employmentType === '1st' ? 180 : 360;
+            
+            // Calculate end date
+            const endDate = new Date(startDate);
+            endDate.setDate(endDate.getDate() + poolDays - 1);
+            
+            // Update the first period
+            const startInput = document.querySelector('.period-start[data-index="0"]');
+            const endInput = document.querySelector('.period-end[data-index="0"]');
+            const totalDaysEl = document.querySelector('.total-days[data-index="0"]');
+            const workTypeSelect = document.querySelector('.work-type[data-index="0"]');
+            
+            startInput.value = formatDateForInput(startDate);
+            endInput.value = formatDateForInput(endDate);
+            
+            // Calculate total days
+            const totalDays = calculateDaysDifference(startDate, endDate);
+            totalDaysEl.textContent = totalDays;
+            
+            // Enable work type selection
+            workTypeSelect.disabled = false;
+            
+            // Store the period data
+            periods[0] = {
+                startDate: startDate,
+                endDate: endDate,
+                totalDays: totalDays,
+                workType: ''
+            };
+            
+            // Update last period end date
+            updateLastPeriodEndDate();
+        }
+        
+        // Handle period start date change
+        function handlePeriodStartChange(event) {
+            const index = parseInt(event.target.dataset.index);
+            const startDate = new Date(event.target.value);
+            
+            if (!startDate || isNaN(startDate.getTime())) {
+                clearPeriodsFromIndex(index);
+                return;
+            }
+            
+            // Check for employment break if not the first period
+            if (index > 0 && periods[index-1]) {
+                const previousEndDate = periods[index-1].endDate;
+                const breakDays = calculateDaysDifference(previousEndDate, startDate) - 1;
+                
+                if (breakDays > 30) {
+                    alert("The employment break is exceeding 30 days!");
+                    event.target.style.backgroundColor = "#ffcccc";
+                } else {
+                    event.target.style.backgroundColor = "";
+                }
+            }
+            
+            // Update the period
+            updatePeriod(index, startDate);
+            recalculateWorkDaysAllocation();
+        }
+        
+        // Handle period end date change
+        function handlePeriodEndChange(event) {
+            const index = parseInt(event.target.dataset.index);
+            const endDate = new Date(event.target.value);
+            
+            if (!endDate || isNaN(endDate.getTime())) {
+                clearPeriodsFromIndex(index);
+                return;
+            }
+            
+            if (!periods[index] || !periods[index].startDate) {
+                return;
+            }
+            
+            const startDate = periods[index].startDate;
+            
+            // Check if end date is after start date
+            if (endDate < startDate) {
+                alert("End date cannot be earlier than start date!");
+                event.target.value = formatDateForInput(periods[index].endDate);
+                return;
+            }
+            
+            // Calculate total days
+            const totalDays = calculateDaysDifference(startDate, endDate);
+            
+            // Check if exceeding pool days
+            const remainingDays = getRemainingPoolDays(index, totalDays);
+            
+            if (remainingDays < 0) {
+                const originalEndDate = periods[index].endDate;
+                alert(`The eligible working period fulfilled on ${formatDateForDisplay(originalEndDate)}!`);
+                event.target.value = formatDateForInput(originalEndDate);
+                return;
+            }
+            
+            // Update the period
+            periods[index].endDate = endDate;
+            periods[index].totalDays = totalDays;
+            document.querySelector(`.total-days[data-index="${index}"]`).textContent = totalDays;
+            
+            // Clear subsequent periods
+            clearPeriodsFromIndex(index + 1);
+            
+            // Create next period if there are remaining days
+            if (remainingDays > 0) {
+                createNextPeriod(index, remainingDays);
+            }
+            
+            updateLastPeriodEndDate();
+            recalculateWorkDaysAllocation();
+        }
+        
+        // Handle work type change
+        function handleWorkTypeChange(event) {
+            const index = parseInt(event.target.dataset.index);
+            const workType = event.target.value;
+            
+            if (periods[index]) {
+                periods[index].workType = workType;
+                recalculateWorkDaysAllocation();
+            }
+        }
+        
+        // Update period with new start date
+        function updatePeriod(index, startDate) {
+            const endInput = document.querySelector(`.period-end[data-index="${index}"]`);
+            const totalDaysEl = document.querySelector(`.total-days[data-index="${index}"]`);
+            const workTypeSelect = document.querySelector(`.work-type[data-index="${index}"]`);
+            
+            // Initialize or update the period
+            if (!periods[index]) {
+                periods[index] = {
+                    startDate: startDate,
+                    endDate: null,
+                    totalDays: 0,
+                    workType: ''
+                };
+            } else {
+                periods[index].startDate = startDate;
+            }
+            
+            // Get remaining pool days
+            const poolDays = employmentTypeEl.value === '1st' ? 180 : 360;
+            const usedDays = periods.slice(0, index).reduce((total, period) => total + (period ? period.totalDays : 0), 0);
+            const remainingDays = poolDays - usedDays;
+            
+            // Calculate end date
+            const endDate = new Date(startDate);
+            endDate.setDate(endDate.getDate() + remainingDays - 1);
+            
+            // Update the end date and total days
+            periods[index].endDate = endDate;
+            periods[index].totalDays = remainingDays;
+            
+            endInput.value = formatDateForInput(endDate);
+            totalDaysEl.textContent = remainingDays;
+            
+            // Enable work type selection
+            workTypeSelect.disabled = false;
+            
+            // Enable the next period if available
+            if (index < MAX_PERIODS - 1) {
+                const nextStartInput = document.querySelector(`.period-start[data-index="${index + 1}"]`);
+                nextStartInput.disabled = false;
+            }
+            
+            // Clear subsequent periods
+            clearPeriodsFromIndex(index + 1);
+            
+            updateLastPeriodEndDate();
+        }
+        
+        // Create next period
+        function createNextPeriod(currentIndex, remainingDays) {
+            const nextIndex = currentIndex + 1;
+            if (nextIndex >= MAX_PERIODS) return;
+            
+            const currentEndDate = periods[currentIndex].endDate;
+            const nextStartDate = new Date(currentEndDate);
+            nextStartDate.setDate(nextStartDate.getDate() + 1);
+            
+            const nextEndDate = new Date(nextStartDate);
+            nextEndDate.setDate(nextStartDate.getDate() + remainingDays - 1);
+            
+            // Update the next period input fields
+            const startInput = document.querySelector(`.period-start[data-index="${nextIndex}"]`);
+            const endInput = document.querySelector(`.period-end[data-index="${nextIndex}"]`);
+            const totalDaysEl = document.querySelector(`.total-days[data-index="${nextIndex}"]`);
+            const workTypeSelect = document.querySelector(`.work-type[data-index="${nextIndex}"]`);
+            
+            startInput.disabled = false;
+            endInput.disabled = false;
+            workTypeSelect.disabled = false;
+            
+            startInput.value = formatDateForInput(nextStartDate);
+            endInput.value = formatDateForInput(nextEndDate);
+            totalDaysEl.textContent = remainingDays;
+            
+            // Store the period data
+            periods[nextIndex] = {
+                startDate: nextStartDate,
+                endDate: nextEndDate,
+                totalDays: remainingDays,
+                workType: ''
+            };
+        }
+        
+        // Get remaining pool days
+        function getRemainingPoolDays(currentIndex, currentPeriodDays) {
+            const poolDays = employmentTypeEl.value === '1st' ? 180 : 360;
+            
+            let usedDays = 0;
+            for (let i = 0; i < periods.length; i++) {
+                if (i !== currentIndex && periods[i] && periods[i].totalDays) {
+                    usedDays += periods[i].totalDays;
+                }
+            }
+            
+            return poolDays - usedDays - currentPeriodDays;
+        }
+        
+        // Update last period end date
+        function updateLastPeriodEndDate() {
+            // Find the last period with data
+            let lastPeriod = null;
+            for (let i = periods.length - 1; i >= 0; i--) {
+                if (periods[i] && periods[i].endDate) {
+                    lastPeriod = periods[i];
+                    break;
+                }
+            }
+            
+            if (lastPeriod) {
+                lastPeriodEndDateEl.value = formatDateForInput(lastPeriod.endDate);
+            } else {
+                lastPeriodEndDateEl.value = '';
+            }
+        }
+        
+        // Recalculate work days allocation
+        function recalculateWorkDaysAllocation() {
+            let totalFullDays = 0;
+            let totalPartDays = 0;
+            
+            periods.forEach(period => {
+                if (period && period.totalDays && period.workType) {
+                    if (period.workType === 'Full') {
+                        totalFullDays += period.totalDays;
+                    } else if (period.workType === 'Part') {
+                        totalPartDays += period.totalDays;
+                    }
+                }
+            });
+            
+            fullDaysEl.textContent = totalFullDays;
+            partDaysEl.textContent = totalPartDays;
+        }
+        
+        // Clear all periods
+        function clearAllPeriods() {
+            periods = [];
+            
+            // Clear all input fields and text content
+            document.querySelectorAll('.period-start, .period-end').forEach(el => {
+                el.value = '';
+                if (el.dataset.index > 0) {
+                    el.disabled = true;
+                }
+            });
+            
+            document.querySelectorAll('.total-days').forEach(el => {
+                el.textContent = '';
+            });
+            
+            document.querySelectorAll('.work-type').forEach(el => {
+                el.value = '';
+                el.disabled = true;
+            });
+            
+            lastPeriodEndDateEl.value = '';
+            fullDaysEl.textContent = '0';
+            partDaysEl.textContent = '0';
+        }
+        
+        // Clear periods from specified index
+        function clearPeriodsFromIndex(startIndex) {
+            for (let i = startIndex; i < MAX_PERIODS; i++) {
+                if (periods[i]) {
+                    periods[i] = null;
+                }
+                
+                const startInput = document.querySelector(`.period-start[data-index="${i}"]`);
+                const endInput = document.querySelector(`.period-end[data-index="${i}"]`);
+                const totalDaysEl = document.querySelector(`.total-days[data-index="${i}"]`);
+                const workTypeSelect = document.querySelector(`.work-type[data-index="${i}"]`);
+                
+                startInput.value = '';
+                endInput.value = '';
+                totalDaysEl.textContent = '';
+                workTypeSelect.value = '';
+                
+                if (i > startIndex) {
+                    startInput.disabled = true;
+                    endInput.disabled = true;
+                    workTypeSelect.disabled = true;
+                }
+            }
+            
+            updateLastPeriodEndDate();
+        }
+        
+        // Helper function: Calculate days difference between two dates (inclusive)
+        function calculateDaysDifference(startDate, endDate) {
+            const oneDay = 24 * 60 * 60 * 1000; // hours * minutes * seconds * milliseconds
+            const diffDays = Math.round(Math.abs((endDate - startDate) / oneDay)) + 1;
+            return diffDays;
+        }
+        
+        // Helper function: Format date for input fields (YYYY-MM-DD)
+        function formatDateForInput(date) {
+            if (!date) return '';
+            const d = new Date(date);
+            let month = '' + (d.getMonth() + 1);
+            let day = '' + d.getDate();
+            const year = d.getFullYear();
+            
+            if (month.length < 2) month = '0' + month;
+            if (day.length < 2) day = '0' + day;
+            
+            return [year, month, day].join('-');
+        }
+        
+        // Helper function: Format date for display (DD/MM/YYYY)
+        function formatDateForDisplay(date) {
+            if (!date) return '';
+            const d = new Date(date);
+            let month = '' + (d.getMonth() + 1);
+            let day = '' + d.getDate();
+            const year = d.getFullYear();
+            
+            if (month.length < 2) month = '0' + month;
+            if (day.length < 2) day = '0' + day;
+            
+            return [day, month, year].join('/');
+        }
+        
+        // Initialize the app
+        initializeTable();
+    </script>
+</body>
+</html>
